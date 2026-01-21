@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { searchOpenLibrary } from "../services/openlibrary.js";
+import { fetchGoogleBooksOffers } from "../services/googlebooks.js";
 
 const router = Router();
 
@@ -24,31 +25,40 @@ router.get("/", async (req, res) => {
   const query = isbn ? `isbn:${isbn}` : q!;
 
   try {
-    const books = await searchOpenLibrary(query, 10);
+    const [books, googleOffers] = await Promise.all([
+      searchOpenLibrary(query, 10),
+      fetchGoogleBooksOffers({ q, isbn, maxItems: 5 })
+    ]);
 
-    // MVP: still mocked offers (same idea as KickRax, but for books)
-    const offers = [
+    // Fallback offers so UI always has something
+    const fallbackOffers = [
       {
         seller: "Amazon",
-        condition: "Used",
+        condition: "Used" as const,
         priceCad: 42.99,
         url: "https://example.com/amazon",
         updatedAt: new Date().toISOString()
       },
       {
         seller: "eCampus",
-        condition: "Rental",
+        condition: "Rental" as const,
         priceCad: 31.5,
         url: "https://example.com/ecampus",
         updatedAt: new Date().toISOString()
       }
     ];
 
+    const offers = googleOffers.length ? googleOffers : fallbackOffers;
+
     return res.json({
       query,
       currency: "CAD",
       books,
-      offers
+      offers,
+      sources: {
+        metadata: ["openlibrary"],
+        pricing: googleOffers.length ? ["googlebooks"] : ["mock"]
+      }
     });
   } catch (e) {
     return res.status(502).json({
