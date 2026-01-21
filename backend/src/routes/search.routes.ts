@@ -1,6 +1,6 @@
-
 import { Router } from "express";
 import { z } from "zod";
+import { searchOpenLibrary } from "../services/openlibrary.js";
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const SearchQuery = z
   })
   .refine((v) => v.q || v.isbn, { message: "Provide q or isbn" });
 
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const parsed = SearchQuery.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -21,13 +21,13 @@ router.get("/", (req, res) => {
   }
 
   const { q, isbn } = parsed.data;
-  const query = isbn ? `ISBN:${isbn}` : q!;
+  const query = isbn ? `isbn:${isbn}` : q!;
 
-  // MVP: mocked offers
-  res.json({
-    query,
-    currency: "CAD",
-    results: [
+  try {
+    const books = await searchOpenLibrary(query, 10);
+
+    // MVP: still mocked offers (same idea as KickRax, but for books)
+    const offers = [
       {
         seller: "Amazon",
         condition: "Used",
@@ -42,8 +42,20 @@ router.get("/", (req, res) => {
         url: "https://example.com/ecampus",
         updatedAt: new Date().toISOString()
       }
-    ]
-  });
+    ];
+
+    return res.json({
+      query,
+      currency: "CAD",
+      books,
+      offers
+    });
+  } catch (e) {
+    return res.status(502).json({
+      error: "Upstream provider failed",
+      message: e instanceof Error ? e.message : "Unknown error"
+    });
+  }
 });
 
 export default router;
