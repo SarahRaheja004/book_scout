@@ -4,33 +4,39 @@ export type Offer = {
     priceCad: number;
     url: string;
     updatedAt: string;
-  };
-  
-  type GoogleBookItem = {
-    volumeInfo?: {
-      title?: string;
-      industryIdentifiers?: Array<{
-        type?: string;
-        identifier?: string;
-      }>;
-    };
-    saleInfo?: {
-      saleability?: string;
-      buyLink?: string;
-      listPrice?: { amount?: number; currencyCode?: string };
-      retailPrice?: { amount?: number; currencyCode?: string };
-    };
+    isbn: string; // REQUIRED so joinOffers can match
   };
   
   type GoogleBooksResponse = {
-    items?: GoogleBookItem[];
+    items?: Array<{
+      volumeInfo?: {
+        title?: string;
+        industryIdentifiers?: Array<{ type?: string; identifier?: string }>;
+      };
+      saleInfo?: {
+        saleability?: string;
+        buyLink?: string;
+        listPrice?: { amount?: number; currencyCode?: string };
+        retailPrice?: { amount?: number; currencyCode?: string };
+      };
+    }>;
   };
   
-  function getIsbnFromItem(item: GoogleBookItem): string | null {
-    const ids = item.volumeInfo?.industryIdentifiers ?? [];
+  function normIsbn(s: string): string {
+    return s.replace(/[^0-9X]/gi, "").toUpperCase();
+  }
+  
+  function getIsbnFromItem(
+    item: GoogleBooksResponse["items"] extends Array<infer T> ? T : never
+  ): string | null {
+    const ids = (item as NonNullable<GoogleBooksResponse["items"]>[number])?.volumeInfo?.industryIdentifiers ?? [];
     const isbn13 = ids.find((x) => x.type === "ISBN_13")?.identifier;
     const isbn10 = ids.find((x) => x.type === "ISBN_10")?.identifier;
-    return isbn13 ?? isbn10 ?? null;
+    const raw = isbn13 ?? isbn10 ?? null;
+    if (!raw) return null;
+    const n = normIsbn(raw);
+    if (n.length !== 10 && n.length !== 13) return null;
+    return n;
   }
   
   async function fxToCad(amount: number, currency: string): Promise<number> {
@@ -39,9 +45,8 @@ export type Offer = {
     const rates: Record<string, number> = {
       USD: 1.35,
       EUR: 1.47,
-      GBP: 1.7
+      GBP: 1.70
     };
-  
     const rate = rates[currency.toUpperCase()];
     return rate ? amount * rate : amount;
   }
@@ -51,9 +56,9 @@ export type Offer = {
     isbn?: string;
     maxItems?: number;
   }): Promise<Offer[]> {
-    const { q, isbn, maxItems = 5 } = args;
+    const { q, isbn, maxItems = 10 } = args;
   
-    const query = isbn ? `isbn:${isbn}` : q ?? "";
+    const query = isbn ? `isbn:${isbn}` : q ? q : "";
     if (!query) return [];
   
     const url = new URL("https://www.googleapis.com/books/v1/volumes");
@@ -78,6 +83,13 @@ export type Offer = {
   
       if (!buyLink || typeof amount !== "number" || !currency) continue;
   
+      // ✅ ISBN is required for joining
+      const itemIsbn = getIsbnFromItem(item);
+      const fallbackReqIsbn = isbn ? normIsbn(isbn) : null;
+      const finalIsbn = itemIsbn ?? fallbackReqIsbn;
+  
+      if (!finalIsbn) continue;
+  
       const priceCad = await fxToCad(amount, currency);
   
       offers.push({
@@ -85,7 +97,8 @@ export type Offer = {
         condition: "Ebook",
         priceCad: Math.round(priceCad * 100) / 100,
         url: buyLink,
-        updatedAt: now
+        updatedAt: now,
+        isbn: finalIsbn
       });
     }
   

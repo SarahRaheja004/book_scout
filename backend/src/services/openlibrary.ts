@@ -9,7 +9,7 @@ type OpenLibraryDoc = {
   };
   
   type OpenLibrarySearchResponse = {
-    docs: OpenLibraryDoc[];
+    docs?: OpenLibraryDoc[];
   };
   
   export type BookHit = {
@@ -29,7 +29,7 @@ type OpenLibraryDoc = {
   }
   
   function pickIsbn(isbns: string[] | undefined, len: 10 | 13): string | null {
-    if (!isbns) return null;
+    if (!isbns || !Array.isArray(isbns)) return null;
     const hit = isbns.find((x) => normalizeIsbn(x).length === len);
     return hit ? normalizeIsbn(hit) : null;
   }
@@ -38,6 +38,12 @@ type OpenLibraryDoc = {
     const url = new URL("https://openlibrary.org/search.json");
     url.searchParams.set("q", query);
     url.searchParams.set("limit", String(limit));
+  
+    // Critical: ask OpenLibrary to include the fields we rely on (esp. isbn)
+    url.searchParams.set(
+      "fields",
+      "key,title,author_name,cover_i,isbn,first_publish_year,edition_count"
+    );
   
     const r = await fetch(url.toString());
     if (!r.ok) throw new Error(`OpenLibrary search failed: ${r.status}`);
